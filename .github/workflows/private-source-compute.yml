@@ -1,0 +1,107 @@
+name: Private-source compute relay
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Fixed audited compute job
+        required: true
+        type: choice
+        options:
+          - distribution-shift
+          - full-reproduction
+          - random-multiseed
+      source_ref:
+        description: Pinned private source branch, tag, or commit
+        required: true
+        type: string
+        default: agent/m3-public-compute
+      seed:
+        description: Seed for full-reproduction only
+        required: false
+        type: string
+        default: "626"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-relay-${{ inputs.job }}-${{ inputs.source_ref }}
+  cancel-in-progress: false
+
+env:
+  JULIA_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  OMP_NUM_THREADS: "1"
+
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out private source at the requested ref
+        uses: actions/checkout@v4
+        with:
+          repository: shengtenghou4-star/19
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.LAZARUS_REPO_TOKEN }}
+          path: private-src
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.8.2"
+          arch: x64
+
+      - uses: julia-actions/cache@v2
+        with:
+          cache-name: public-relay-${{ inputs.job }}
+
+      - name: Execute without publishing private logs
+        id: compute
+        shell: bash
+        env:
+          RELAY_JOB: ${{ inputs.job }}
+          RELAY_SEED: ${{ inputs.seed }}
+        run: |
+          set +e
+          mkdir -p private-src/relay-output
+          (
+            cd private-src
+            set +x
+            GNL_SEED="$RELAY_SEED" \
+              RELAY_OUTPUT_ROOT=relay-output \
+              bash scripts/public_compute_entry.sh "$RELAY_JOB"
+          ) >private-src/relay-output/relay.log 2>&1
+          status=$?
+          printf '%s\n' "$status" >private-src/relay-output/relay_exit_status.txt
+          printf 'status=%s\n' "$status" >>"$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Push logs and results only to the private repository
+        shell: bash
+        env:
+          RELAY_JOB: ${{ inputs.job }}
+        run: |
+          set -euo pipefail
+          cd private-src
+          result_branch="compute-results/${RELAY_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name "public-compute-relay[bot]"
+          git config user.email "public-compute-relay[bot]@users.noreply.github.com"
+          git switch -c "$result_branch"
+          git add -f relay-output
+          git commit -m "Store public-runner ${RELAY_JOB} result ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          git push origin "HEAD:${result_branch}"
+          printf 'Private result branch created: `%s`\n' "$result_branch" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce private compute result
+        if: ${{ steps.compute.outputs.status != '0' }}
+        shell: bash
+        run: |
+          echo "The private compute entrypoint failed; full diagnostics were pushed to the private result branch." >&2
+          exit 1
