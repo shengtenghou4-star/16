@@ -31,14 +31,15 @@ Do not place the token in variables, files, commits, workflow inputs, issue comm
 
 Open **Actions → Private-source compute relay → Run workflow** and choose one fixed job:
 
-- `distribution-shift`
-- `full-reproduction`
-- `random-multiseed`
+- `distribution-shift` — one seed, three split types;
+- `distribution-shift-multiseed` — seeds 626–630 across entry-random, virus-held-out, and study-held-out, including the seen-antibody secondary endpoint;
+- `full-reproduction` — one random-mask full reproduction;
+- `random-multiseed` — five random-mask full reproductions.
 
 The default private source ref is `agent/m3-public-compute`. A successful or failed run creates a private result branch named like:
 
 `compute-results/<job>-<run-id>-<attempt>`
 
-Only that private branch contains the logs and scientific outputs.
+Only that private branch contains the logs and scientific outputs. The public Actions page exposes only setup status, the fixed job name, and the private result branch name—not metrics, predictions, source files, or logs.
 
 This repository is only a runner boundary. The private repository remains the authoritative project record.
