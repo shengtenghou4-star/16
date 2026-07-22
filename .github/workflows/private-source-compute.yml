@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - distribution-shift
+          - distribution-shift-multiseed
           - full-reproduction
           - random-multiseed
       source_ref:
@@ -17,7 +18,7 @@ on:
         type: string
         default: agent/m3-public-compute
       seed:
-        description: Seed for full-reproduction only
+        description: Seed for single-seed jobs only
         required: false
         type: string
         default: "626"
