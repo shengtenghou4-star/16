@@ -1,8 +1,9 @@
 {
   "job": "fixed-private-study-l-identity",
-  "source_commit": "7bd1c4e5ab78bcaf9b74cbc9238ea1ceef900600",
+  "source_commit": "e7bd4bbf9d5e1dabd7470c5f2211cbb9021fe199",
   "dataset": "aicrowd/arc-whestbench-public-2026@v1-phase1/mini",
   "purpose": "candidate J implementation identity audit only; no model fitting or tuning",
   "expected_raw_mse": 2.7989686691398676e-6,
-  "relative_tolerance": 1e-4
+  "relative_tolerance": 1e-4,
+  "launch_attempt": 2
 }
