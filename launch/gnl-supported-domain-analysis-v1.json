@@ -6,5 +6,7 @@
   "model_refits": 0,
   "private_actions": false,
   "paid_runners": false,
-  "launch_policy": "one-shot-public-standard-runner"
+  "launch_policy": "single-root-cause-retry-public-standard-runner",
+  "retry_revision": 2,
+  "retry_reason": "install numpy and scipy before no-refit analysis"
 }
