@@ -26,7 +26,36 @@ env:
   OMP_NUM_THREADS: "1"
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out private source
+        uses: actions/checkout@v4
+        with:
+          repository: shengtenghou4-star/19
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ secrets.LAZARUS_REPO_TOKEN }}
+          path: private-src
+          fetch-depth: 1
+          persist-credentials: true
+      - name: Verify private write permission
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          branch="compute-heartbeat/gnl-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name "public-compute-relay[bot]"
+          git config user.email "public-compute-relay[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          mkdir -p relay-heartbeat
+          printf '{"run_id":"%s","attempt":"%s","status":"ok"}\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >relay-heartbeat/gnl-v2.json
+          git add relay-heartbeat/gnl-v2.json
+          git commit -m "Verify public relay private write access"
+          git push origin "HEAD:$branch"
+
   compute:
+    needs: preflight
     strategy:
       fail-fast: false
       max-parallel: 5
