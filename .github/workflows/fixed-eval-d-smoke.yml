@@ -4,12 +4,15 @@ on:
   push:
     paths:
       - "launch/eval-d-smoke.json"
+  pull_request:
+    paths:
+      - "launch/eval-d-smoke-pr.txt"
 
 permissions:
   contents: read
 
 concurrency:
-  group: fixed-private-eval-d-smoke
+  group: fixed-private-eval-d-smoke-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
