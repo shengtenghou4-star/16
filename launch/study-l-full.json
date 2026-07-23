@@ -5,5 +5,6 @@
   "dataset": "aicrowd/arc-whestbench-public-2026@v1-phase1/full",
   "split_protocol": "800_train_100_validation_100_untouched_test",
   "promotion_gate": "mean_ratio<=0.90,q90_ratio<=1,max_ratio<=1",
-  "mini_policy": "no mini access until full model frozen"
+  "mini_policy": "no mini access until full model frozen",
+  "launch_attempt": 2
 }
