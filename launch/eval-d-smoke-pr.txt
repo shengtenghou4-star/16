@@ -1,0 +1,1 @@
+fixed candidate D smoke validation; capture full-run status; no dynamic inputs
