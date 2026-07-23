@@ -26,7 +26,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: shengtenghou4-star/19
-          ref: a686acb9b30bd81fc631d6ec180c3d5e9a1f3426
+          ref: f05e47f5aeb0bc464abe19950553c78a448e4868
           token: ${{ secrets.LAZARUS_REPO_TOKEN }}
           path: private-src
           fetch-depth: 0
@@ -58,7 +58,7 @@ jobs:
           import base64, gzip, hashlib
           from pathlib import Path
           archive = Path('whitebox_study_l/study_l_full_corrector.py.gz.b64')
-          source = gzip.decompress(base64.b64decode(archive.read_bytes(), validate=True))
+          source = gzip.decompress(base64.b64decode(archive.read_bytes().strip(), validate=True))
           actual = hashlib.sha256(source).hexdigest()
           expected = '24a00ea012273f52b303c4cdb526946a3cb01124745d5fa58f80d70ad4b2d306'
           print({'actual': actual, 'expected': expected, 'bytes': len(source)})
@@ -84,7 +84,7 @@ jobs:
             find relay-output-study-l -type f ! -name SHA256SUMS -print0 \
               | sort -z \
               | xargs -0 sha256sum > relay-output-study-l/SHA256SUMS
-            printf '{"schema_version":"1.0","job":"study-l-full","run_id":"%s","attempt":"%s","source_commit":"a686acb9b30bd81fc631d6ec180c3d5e9a1f3426"}\n' \
+            printf '{"schema_version":"1.0","job":"study-l-full","run_id":"%s","attempt":"%s","source_commit":"f05e47f5aeb0bc464abe19950553c78a448e4868"}\n' \
               "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > relay-output-study-l/manifest.json
           ) > private-src/relay-output-study-l/wrapper.log 2>&1
           exit 0
