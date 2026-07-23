@@ -1,4 +1,4 @@
-name: Private-source compute relay
+name: Private-source compute relay v2
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
           path: private-src
           fetch-depth: 1
           persist-credentials: true
-      - name: Verify private write permission
+      - name: Verify private read/write permission
         shell: bash
         run: |
           set -euo pipefail
@@ -49,7 +49,8 @@ jobs:
           git config user.email "public-compute-relay[bot]@users.noreply.github.com"
           git switch -c "$branch"
           mkdir -p relay-heartbeat
-          printf '{"run_id":"%s","attempt":"%s","status":"ok"}\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >relay-heartbeat/gnl-v2.json
+          printf '{"run_id":"%s","attempt":"%s","status":"ok","source_ref":"%s"}\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$SOURCE_REF" > relay-heartbeat/gnl-v2.json
           git add relay-heartbeat/gnl-v2.json
           git commit -m "Verify public relay private write access"
           git push origin "HEAD:$branch"
@@ -64,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Check out private source at the requested ref
+      - name: Check out private source at pinned ref
         uses: actions/checkout@v4
         with:
           repository: shengtenghou4-star/19
@@ -87,7 +88,7 @@ jobs:
         with:
           cache-name: public-relay-distribution-shift-v2-${{ matrix.seed }}
 
-      - name: Execute one grouped-split seed without publishing private logs
+      - name: Execute one grouped-split seed privately
         id: compute
         shell: bash
         env:
@@ -101,13 +102,13 @@ jobs:
             GNL_SEED="$RELAY_SEED" \
               RELAY_OUTPUT_ROOT=relay-output \
               bash scripts/public_compute_entry.sh distribution-shift
-          ) >private-src/relay-output/relay.log 2>&1
+          ) > private-src/relay-output/relay.log 2>&1
           status=$?
-          printf '%s\n' "$status" >private-src/relay-output/relay_exit_status.txt
-          printf 'status=%s\n' "$status" >>"$GITHUB_OUTPUT"
+          printf '%s\n' "$status" > private-src/relay-output/relay_exit_status.txt
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Push logs and results only to the private repository
+      - name: Push shard logs and results only to private repository
         if: always()
         shell: bash
         env:
@@ -122,11 +123,105 @@ jobs:
           git add -f relay-output
           git commit -m "Store public-runner distribution-shift seed ${RELAY_SEED} result"
           git push origin "HEAD:${result_branch}"
-          printf 'Private shard branch created: `%s`\n' "$result_branch" >>"$GITHUB_STEP_SUMMARY"
+          printf 'Private shard branch created: `%s`\n' "$result_branch" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Enforce private compute result
+      - name: Enforce shard result
         if: ${{ steps.compute.outputs.status != '0' }}
         shell: bash
         run: |
-          echo "The seed shard failed; full diagnostics were pushed to its private branch." >&2
+          echo "The seed shard failed; diagnostics were preserved privately." >&2
           exit 1
+
+  aggregate:
+    needs: compute
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out private source for aggregation
+        uses: actions/checkout@v4
+        with:
+          repository: shengtenghou4-star/19
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ secrets.LAZARUS_REPO_TOKEN }}
+          path: private-src
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collect and verify five private shard branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          mkdir -p aggregate-input final-relay-output/shard-manifests
+          for seed in 626 627 628 629 630; do
+            branch="compute-shards/distribution-shift-v2-${GITHUB_RUN_ID}-seed-${seed}"
+            git fetch --no-tags origin "refs/heads/${branch}:refs/remotes/origin/shard-${seed}"
+            test "$(git show "origin/shard-${seed}:relay-output/relay_exit_status.txt" | tr -d '\r\n')" = "0"
+            mkdir -p "aggregate-input/seed-${seed}"
+            git archive --format=tar "origin/shard-${seed}" \
+              "relay-output/distribution-shift-seed-${seed}" \
+              | tar -xf - -C "aggregate-input/seed-${seed}" --strip-components=2
+            git show "origin/shard-${seed}:relay-output/relay_manifest.json" \
+              > "final-relay-output/shard-manifests/seed-${seed}.json"
+          done
+
+      - name: Aggregate grouped-split results without public metric output
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          python scripts/aggregate_gnl_shift_multiseed.py \
+            --input-root aggregate-input \
+            --output final-relay-output/summary \
+            --expected-seeds 626 627 628 629 630 \
+            > final-relay-output/aggregate.log 2>&1
+          python - <<'PY'
+          from __future__ import annotations
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('final-relay-output')
+          files = {}
+          for path in sorted(root.rglob('*')):
+              if path.is_file() and path.name != 'relay_manifest.json':
+                  files[path.relative_to(root).as_posix()] = {
+                      'bytes': path.stat().st_size,
+                      'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                  }
+          manifest = {
+              'schema_version': '2.0',
+              'job': 'distribution-shift-multiseed-v2',
+              'github_run_id': os.environ['GITHUB_RUN_ID'],
+              'github_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'source_ref': os.environ['SOURCE_REF'],
+              'seeds': [626, 627, 628, 629, 630],
+              'splits': ['entry_random', 'virus_held_out', 'study_held_out'],
+              'exit_status': 0,
+              'files': files,
+          }
+          (root / 'relay_manifest.json').write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          PY
+
+      - name: Push final aggregate only to private repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          result_branch="compute-results/distribution-shift-multiseed-v2-${GITHUB_RUN_ID}"
+          git config user.name "public-compute-relay[bot]"
+          git config user.email "public-compute-relay[bot]@users.noreply.github.com"
+          git switch -c "$result_branch"
+          rm -rf relay-output
+          mv final-relay-output relay-output
+          git add -f relay-output
+          git commit -m "Store verified GNL grouped-split multi-seed aggregate"
+          git push origin "HEAD:${result_branch}"
+          printf 'Private aggregate branch created: `%s`\n' "$result_branch" >> "$GITHUB_STEP_SUMMARY"
