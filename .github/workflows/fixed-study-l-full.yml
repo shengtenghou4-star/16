@@ -1,0 +1,114 @@
+name: Fixed private Study L full-split training
+
+on:
+  push:
+    paths:
+      - "launch/study-l-full.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixed-private-study-l-full
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      HF_HOME: ${{ runner.temp }}/hf
+      HF_XET_HIGH_PERFORMANCE: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - name: Check out pinned private Study L source
+        uses: actions/checkout@v4
+        with:
+          repository: shengtenghou4-star/19
+          ref: a686acb9b30bd81fc631d6ec180c3d5e9a1f3426
+          token: ${{ secrets.LAZARUS_REPO_TOKEN }}
+          path: private-src
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Execute fixed Study L privately
+        shell: bash
+        run: |
+          set +e
+          mkdir -p private-src/relay-output-study-l
+          (
+            cd private-src
+            set +x
+            python -m pip install --disable-pip-version-check \
+              'flopscope>=0.8.0rc5,<0.9.0' \
+              'whestbench>=0.12.0rc3,<0.13.0' \
+              'scipy>=1.14,<2' \
+              'scikit-learn>=1.5,<2' \
+              > relay-output-study-l/install.log 2>&1
+            install_status=$?
+            printf '%s\n' "$install_status" > relay-output-study-l/install_exit_status.txt
+
+            if [ "$install_status" -eq 0 ]; then
+              python - <<'PY' > relay-output-study-l/integrity.log 2>&1
+          import base64, gzip, hashlib
+          from pathlib import Path
+          archive = Path('whitebox_study_l/study_l_full_corrector.py.gz.b64')
+          source = gzip.decompress(base64.b64decode(archive.read_bytes(), validate=True))
+          actual = hashlib.sha256(source).hexdigest()
+          expected = '24a00ea012273f52b303c4cdb526946a3cb01124745d5fa58f80d70ad4b2d306'
+          print({'actual': actual, 'expected': expected, 'bytes': len(source)})
+          if actual != expected:
+              raise SystemExit(2)
+          PY
+              integrity_status=$?
+            else
+              integrity_status=99
+            fi
+            printf '%s\n' "$integrity_status" > relay-output-study-l/integrity_exit_status.txt
+
+            if [ "$install_status" -eq 0 ] && [ "$integrity_status" -eq 0 ]; then
+              python whitebox_study_l/run.py \
+                --cache relay-output-study-l/full_features.npz \
+                --output relay-output-study-l \
+                > relay-output-study-l/train.log 2>&1
+              train_status=$?
+            else
+              train_status=98
+            fi
+            printf '%s\n' "$train_status" > relay-output-study-l/train_exit_status.txt
+            find relay-output-study-l -type f ! -name SHA256SUMS -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > relay-output-study-l/SHA256SUMS
+            printf '{"schema_version":"1.0","job":"study-l-full","run_id":"%s","attempt":"%s","source_commit":"a686acb9b30bd81fc631d6ec180c3d5e9a1f3426"}\n' \
+              "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > relay-output-study-l/manifest.json
+          ) > private-src/relay-output-study-l/wrapper.log 2>&1
+          exit 0
+
+      - name: Push Study L outputs only to private repository
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          branch="compute-results/study-l-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name "public-compute-relay[bot]"
+          git config user.email "public-compute-relay[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -f relay-output-study-l
+          git commit -m "Store fixed private Study L full-split result"
+          git push origin "HEAD:$branch"
+          printf 'Private Study L result branch created: `%s`\n' "$branch" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce Study L result
+        shell: bash
+        run: |
+          status="$(cat private-src/relay-output-study-l/train_exit_status.txt 2>/dev/null || printf '97')"
+          if [ "$status" != "0" ]; then
+            echo "Study L failed; diagnostics were preserved privately." >&2
+            exit 1
+          fi
