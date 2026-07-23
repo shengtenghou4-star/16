@@ -1,0 +1,7 @@
+{
+  "job": "fixed-private-eval-d-smoke",
+  "source_repository": "shengtenghou4-star/19",
+  "source_ref": "relay/eval-d-20260723",
+  "source_commit": "595cad68df921f940f34f32cbe7b67898632fd99",
+  "purpose": "install and whest validate only"
+}
