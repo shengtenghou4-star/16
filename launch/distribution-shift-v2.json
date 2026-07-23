@@ -5,6 +5,7 @@
   "splits": ["entry_random", "virus_held_out", "study_held_out"],
   "launch_policy": "one-shot-public-standard-runners-only",
   "private_actions": false,
-  "launch_revision": 2,
-  "launched_at_utc": "2026-07-23T06:18:00Z"
+  "launch_revision": 3,
+  "trigger": "pull_request",
+  "requested_at_utc": "2026-07-23T07:25:00Z"
 }
