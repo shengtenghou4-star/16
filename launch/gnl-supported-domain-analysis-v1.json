@@ -1,0 +1,10 @@
+{
+  "job": "gnl-supported-domain-analysis-v1",
+  "source_ref": "agent/m3-public-compute",
+  "prediction_run": "30006140367",
+  "seeds": [626, 627, 628, 629, 630],
+  "model_refits": 0,
+  "private_actions": false,
+  "paid_runners": false,
+  "launch_policy": "one-shot-public-standard-runner"
+}
