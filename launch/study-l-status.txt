@@ -1,1 +1,1 @@
-read fixed Study L status only; launch attempt 2; no dynamic inputs
+read fixed Study L status only; launch attempt 3; no dynamic inputs
