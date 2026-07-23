@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
-      HF_HOME: ${{ runner.temp }}/hf
+      HF_HOME: /tmp/hf-study-l
       HF_XET_HIGH_PERFORMANCE: "1"
       HF_HUB_DISABLE_PROGRESS_BARS: "1"
       TOKENIZERS_PARALLELISM: "false"
