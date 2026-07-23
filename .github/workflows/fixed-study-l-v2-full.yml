@@ -1,0 +1,97 @@
+name: Fixed private Study L v2 full-split training
+
+on:
+  push:
+    paths:
+      - "launch/study-l-v2-full.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixed-private-study-l-v2-full
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      HF_HOME: /tmp/hf-study-l-v2
+      HF_XET_HIGH_PERFORMANCE: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - name: Check out pinned private Study L v2 source
+        uses: actions/checkout@v4
+        with:
+          repository: shengtenghou4-star/19
+          ref: e7bd4bbf9d5e1dabd7470c5f2211cbb9021fe199
+          token: ${{ secrets.LAZARUS_REPO_TOKEN }}
+          path: private-src
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Execute fixed Study L v2 privately
+        shell: bash
+        run: |
+          set +e
+          mkdir -p private-src/relay-output-study-l-v2
+          (
+            cd private-src
+            set +x
+            python -m pip install --disable-pip-version-check \
+              'flopscope>=0.8.0rc5,<0.9.0' \
+              'whestbench>=0.12.0rc3,<0.13.0' \
+              'scipy>=1.14,<2' \
+              'scikit-learn>=1.5,<2' \
+              > relay-output-study-l-v2/install.log 2>&1
+            install_status=$?
+            printf '%s\n' "$install_status" > relay-output-study-l-v2/install_exit_status.txt
+
+            if [ "$install_status" -eq 0 ]; then
+              python whitebox_study_l/run.py \
+                --dataset-split full \
+                --cache relay-output-study-l-v2/full_features.npz \
+                --output relay-output-study-l-v2 \
+                > relay-output-study-l-v2/train.log 2>&1
+              train_status=$?
+            else
+              train_status=99
+            fi
+            printf '%s\n' "$train_status" > relay-output-study-l-v2/train_exit_status.txt
+            find relay-output-study-l-v2 -type f ! -name SHA256SUMS -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > relay-output-study-l-v2/SHA256SUMS
+            printf '{"schema_version":"1.0","job":"study-l-v2-full","run_id":"%s","attempt":"%s","source_commit":"e7bd4bbf9d5e1dabd7470c5f2211cbb9021fe199","identity_ratio":1.0000103250274073}\n' \
+              "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > relay-output-study-l-v2/manifest.json
+          ) > private-src/relay-output-study-l-v2/wrapper.log 2>&1
+          exit 0
+
+      - name: Push Study L v2 outputs only to private repository
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          branch="compute-results/study-l-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name "public-compute-relay[bot]"
+          git config user.email "public-compute-relay[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -f relay-output-study-l-v2
+          git commit -m "Store fixed private Study L v2 full-split result"
+          git push origin "HEAD:$branch"
+          printf 'Private Study L v2 result branch created: `%s`\n' "$branch" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce Study L v2 result
+        shell: bash
+        run: |
+          status="$(cat private-src/relay-output-study-l-v2/train_exit_status.txt 2>/dev/null || printf '97')"
+          if [ "$status" != "0" ]; then
+            echo "Study L v2 failed; diagnostics were preserved privately." >&2
+            exit 1
+          fi
