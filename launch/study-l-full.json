@@ -1,10 +1,10 @@
 {
   "job": "fixed-private-study-l-full",
   "source_repository": "shengtenghou4-star/19",
-  "source_commit": "a686acb9b30bd81fc631d6ec180c3d5e9a1f3426",
+  "source_commit": "f05e47f5aeb0bc464abe19950553c78a448e4868",
   "dataset": "aicrowd/arc-whestbench-public-2026@v1-phase1/full",
   "split_protocol": "800_train_100_validation_100_untouched_test",
   "promotion_gate": "mean_ratio<=0.90,q90_ratio<=1,max_ratio<=1",
   "mini_policy": "no mini access until full model frozen",
-  "launch_attempt": 2
+  "launch_attempt": 3
 }
