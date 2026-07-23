@@ -4,5 +4,7 @@
   "seeds": [626, 627, 628, 629, 630],
   "splits": ["entry_random", "virus_held_out", "study_held_out"],
   "launch_policy": "one-shot-public-standard-runners-only",
-  "private_actions": false
+  "private_actions": false,
+  "launch_revision": 2,
+  "launched_at_utc": "2026-07-23T06:18:00Z"
 }
