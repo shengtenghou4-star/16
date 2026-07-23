@@ -38,7 +38,11 @@ jobs:
           set -euo pipefail
           cd private-src
           python -m pip install --upgrade pip > /tmp/gnl-setup.log 2>&1
-          pip install -e '.[dev]' >> /tmp/gnl-setup.log 2>&1
+          pip install -e '.[dev]' numpy scipy >> /tmp/gnl-setup.log 2>&1
+          python - <<'PY'
+          import numpy, scipy
+          print(numpy.__version__, scipy.__version__)
+          PY
           mkdir -p artifacts
           PYTHONPATH=src:. python scripts/export_gnl_matrix.py \
             --cache artifacts/upstream-cache \
