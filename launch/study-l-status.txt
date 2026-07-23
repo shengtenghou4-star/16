@@ -1,0 +1,1 @@
+read fixed Study L status only; no dynamic inputs
