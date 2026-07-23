@@ -1,0 +1,145 @@
+name: GNL supported-domain mechanism analysis
+
+on:
+  pull_request:
+    paths:
+      - "launch/gnl-supported-domain-analysis-v1.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gnl-supported-domain-analysis-v1
+  cancel-in-progress: false
+
+jobs:
+  analyze-existing-predictions:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out pinned private source
+        uses: actions/checkout@v4
+        with:
+          repository: shengtenghou4-star/19
+          ref: agent/m3-public-compute
+          token: ${{ secrets.LAZARUS_REPO_TOKEN }}
+          path: private-src
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Materialize Python environment and exact public matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          python -m pip install --upgrade pip > /tmp/gnl-setup.log 2>&1
+          pip install -e '.[dev]' >> /tmp/gnl-setup.log 2>&1
+          mkdir -p artifacts
+          PYTHONPATH=src:. python scripts/export_gnl_matrix.py \
+            --cache artifacts/upstream-cache \
+            --output artifacts/gnl-matrix \
+            >> /tmp/gnl-setup.log 2>&1
+
+      - name: Collect locked private prediction files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          mkdir -p analysis-input
+          for seed in 626 627 628 629 630; do
+            branch="compute-shards/distribution-shift-v2-30006140367-seed-${seed}"
+            git fetch --no-tags origin "refs/heads/${branch}:refs/remotes/origin/prediction-${seed}"
+            target="analysis-input/seed-${seed}/distribution-shift-seed-${seed}/study_held_out"
+            mkdir -p "$target"
+            git show "origin/prediction-${seed}:relay-output/distribution-shift-seed-${seed}/study_held_out/withheld_predictions.csv" \
+              > "$target/withheld_predictions.csv"
+          done
+
+      - name: Analyze supported-domain residual mechanisms without refitting
+        id: analysis
+        shell: bash
+        run: |
+          set +e
+          cd private-src
+          mkdir -p analysis-output
+          PYTHONPATH=src:. python scripts/analyze_gnl_supported_domain_multiseed.py \
+            --assay artifacts/upstream-cache/catnap_single.csv \
+            --matrix-dir artifacts/gnl-matrix \
+            --predictions-root analysis-input \
+            --output analysis-output \
+            --seeds 626 627 628 629 630 \
+            > analysis-output/analysis.log 2>&1
+          status=$?
+          printf '%s\n' "$status" > analysis-output/exit_status.txt
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build private evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          python - <<'PY'
+          from __future__ import annotations
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("analysis-output")
+          files = {}
+          for path in sorted(root.rglob("*")):
+              if path.is_file() and path.name != "relay_manifest.json":
+                  files[path.relative_to(root).as_posix()] = {
+                      "bytes": path.stat().st_size,
+                      "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                  }
+          status_path = root / "exit_status.txt"
+          status = int(status_path.read_text(encoding="utf-8").strip()) if status_path.exists() else 99
+          manifest = {
+              "schema_version": "1.0",
+              "job": "gnl-supported-domain-analysis-v1",
+              "github_run_id": os.environ["GITHUB_RUN_ID"],
+              "github_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "source_ref": "agent/m3-public-compute",
+              "source_prediction_run": "30006140367",
+              "seeds": [626, 627, 628, 629, 630],
+              "model_refits": 0,
+              "exit_status": status,
+              "files": files,
+          }
+          (root / "relay_manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Push analysis and logs only to private repository
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          result_branch="analysis-results/gnl-supported-domain-v1-${GITHUB_RUN_ID}"
+          git config user.name "public-compute-relay[bot]"
+          git config user.email "public-compute-relay[bot]@users.noreply.github.com"
+          git switch -c "$result_branch"
+          rm -rf relay-analysis
+          mv analysis-output relay-analysis
+          git add -f relay-analysis
+          git commit -m "Store no-refit GNL supported-domain analysis"
+          git push origin "HEAD:${result_branch}"
+          printf 'Private analysis branch created.\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce analysis result
+        if: ${{ steps.analysis.outputs.status != '0' }}
+        shell: bash
+        run: |
+          echo "The no-refit analysis failed; diagnostics were preserved privately." >&2
+          exit 1
