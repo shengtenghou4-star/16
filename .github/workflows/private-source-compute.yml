@@ -8,15 +8,19 @@ on:
         required: true
         type: string
         default: agent/m3-public-compute
+  push:
+    paths:
+      - "launch/distribution-shift-v2.json"
 
 permissions:
   contents: read
 
 concurrency:
-  group: public-relay-distribution-shift-v2-${{ inputs.source_ref }}
+  group: public-relay-distribution-shift-v2
   cancel-in-progress: false
 
 env:
+  SOURCE_REF: ${{ inputs.source_ref || 'agent/m3-public-compute' }}
   JULIA_NUM_THREADS: "1"
   OPENBLAS_NUM_THREADS: "1"
   OMP_NUM_THREADS: "1"
@@ -35,7 +39,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: shengtenghou4-star/19
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ env.SOURCE_REF }}
           token: ${{ secrets.LAZARUS_REPO_TOKEN }}
           path: private-src
           fetch-depth: 0
