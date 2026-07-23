@@ -1,0 +1,159 @@
+name: AssuranceOS v1.6 live PostgreSQL and MinIO certification
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/assuranceos-v1.6-live.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assuranceos-v1.6-live
+  cancel-in-progress: false
+
+env:
+  PRIVATE_REPO: shengtenghou4-star/15
+  PRIVATE_SOURCE_REF: 0cec963554e2282ac70e7878d24c82d9d062ed98
+  PRIVATE_RESULT_BRANCH: agent/v1.6-live-infrastructure
+  SOURCE_TREE_SHA256: 5c26ce616ec7d0917e4a0c0ce2cab5c904e6e2b0c8a194d78decf0c15d09faca
+  RUNTIME_SHA256: c88c7dc1d371e60d937341972ec8c0d0b6c5a4e60fb7c2abd35b14890cdd1a3b
+  POSTGRES_IMAGE: postgres:16-alpine
+  MINIO_IMAGE: minio/minio:RELEASE.2025-10-15T17-29-55Z
+  POSTGRES_USER: assuranceos
+  POSTGRES_PASSWORD: assuranceos
+  POSTGRES_DB: assuranceos
+  MINIO_ROOT_USER: assuranceos-live
+  MINIO_ROOT_PASSWORD: assuranceos-live-secret-626
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout public compute relay
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Configure Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+
+      - name: Fetch and verify private runtime bundle
+        env:
+          PRIVATE_TOKEN: ${{ secrets.LAZARUS_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${PRIVATE_TOKEN}"
+          ROOT="${RUNNER_TEMP}/runtime-b64"
+          mkdir -p "${ROOT}"
+          for name in part-000 part-001 part-002 manifest.json restore.py; do
+            curl --fail --silent --show-error --location \
+              -H "Authorization: Bearer ${PRIVATE_TOKEN}" \
+              -H 'Accept: application/vnd.github.raw+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${PRIVATE_REPO}/contents/releases/v1.6/runtime-b64/${name}?ref=${PRIVATE_SOURCE_REF}" \
+              --output "${ROOT}/${name}"
+          done
+          python "${ROOT}/restore.py" \
+            --output "${RUNNER_TEMP}/AssuranceOS-v1.6-runtime.tar.xz" \
+            --extract-to "${RUNNER_TEMP}/AssuranceOS-v1.6-runtime"
+          test "$(sha256sum "${RUNNER_TEMP}/AssuranceOS-v1.6-runtime.tar.xz" | cut -d' ' -f1)" = "${RUNTIME_SHA256}"
+          python -m compileall -q "${RUNNER_TEMP}/AssuranceOS-v1.6-runtime"
+
+      - name: Install certification runtime
+        working-directory: ${{ runner.temp }}/AssuranceOS-v1.6-runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Run destructive PostgreSQL and MinIO campaigns
+        working-directory: ${{ runner.temp }}/AssuranceOS-v1.6-runtime
+        run: |
+          set -euo pipefail
+          A="${RUNNER_TEMP}/aos-v1.6-live-artifacts"; L="${A}/logs"
+          mkdir -p "${L}"; : > "${A}/step-status.tsv"
+          record() {
+            local n="$1"; shift
+            set +e; "$@" >"${L}/${n}.log" 2>&1; local rc=$?; set -e
+            if [ "$rc" -eq 0 ]; then printf '%s\tpassed\n' "$n" >>"${A}/step-status.tsv"; else printf '%s\tfailed\n' "$n" >>"${A}/step-status.tsv"; fi
+          }
+          cleanup() { docker unpause aos-postgres16 aos-minio >/dev/null 2>&1 || true; docker rm -f aos-postgres16 aos-minio >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          export PYTHONPATH="${PWD}/src"
+          SOURCE_REVISION="${PRIVATE_SOURCE_REF}"
+
+          record postgres-pull docker pull "${POSTGRES_IMAGE}"
+          record postgres-start bash -c '
+            docker rm -f aos-postgres16 >/dev/null 2>&1 || true
+            docker run -d --name aos-postgres16 -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" -e POSTGRES_USER="$POSTGRES_USER" -e POSTGRES_DB="$POSTGRES_DB" -p 5432:5432 "$POSTGRES_IMAGE" >/dev/null
+            for i in $(seq 1 60); do docker exec aos-postgres16 pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
+          DB="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}?connect_timeout=3"
+          CID="v1.6-postgres-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          record postgres-backend-termination python scripts/certify_postgresql_faults.py --database-url "$DB" --project-version 1.6.0 --source-revision "$SOURCE_REVISION" --source-tree-sha256 "$SOURCE_TREE_SHA256" --namespace "terminate-${CID}" --output "${A}/postgresql-backend-termination.json"
+          record postgres-partition-preflight python scripts/run_network_partition_phase.py --phase preflight --database-url "$DB" --campaign-id "$CID" --namespace "$CID" --source-revision "$SOURCE_REVISION" --source-tree-sha256 "$SOURCE_TREE_SHA256" --output "${A}/postgresql-partition-preflight.json"
+          record postgres-pause docker pause aos-postgres16
+          record postgres-partition-outage timeout 15s python scripts/run_network_partition_phase.py --phase partition --database-url "$DB" --campaign-id "$CID" --namespace "$CID" --source-revision "$SOURCE_REVISION" --source-tree-sha256 "$SOURCE_TREE_SHA256" --output "${A}/postgresql-partition-outage.json"
+          record postgres-unpause docker unpause aos-postgres16
+          record postgres-recovery-ready bash -c 'for i in $(seq 1 60); do docker exec aos-postgres16 pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
+          record postgres-partition-recovery python scripts/run_network_partition_phase.py --phase recovery --database-url "$DB" --campaign-id "$CID" --namespace "$CID" --source-revision "$SOURCE_REVISION" --source-tree-sha256 "$SOURCE_TREE_SHA256" --output "${A}/postgresql-partition-recovery.json"
+          record postgres-partition-aggregate python scripts/aggregate_fault_campaign.py --evidence "${A}/postgresql-partition-preflight.json" "${A}/postgresql-partition-outage.json" "${A}/postgresql-partition-recovery.json" --output "${A}/postgresql-network-partition.json"
+
+          record minio-pull docker pull "${MINIO_IMAGE}"
+          record minio-start bash -c '
+            docker rm -f aos-minio >/dev/null 2>&1 || true
+            docker run -d --name aos-minio -e MINIO_ROOT_USER="$MINIO_ROOT_USER" -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" -p 9000:9000 "$MINIO_IMAGE" server /data --address :9000 >/dev/null
+            for i in $(seq 1 60); do curl --fail --silent http://127.0.0.1:9000/minio/health/ready >/dev/null && exit 0; sleep 1; done; exit 1'
+          STATE="${A}/minio-state.json"
+          COMMON=(--endpoint-url http://127.0.0.1:9000 --access-key "$MINIO_ROOT_USER" --secret-key "$MINIO_ROOT_PASSWORD" --bucket assuranceos-live-certification --region us-east-1 --project-version 1.6.0 --source-revision "$SOURCE_REVISION" --source-tree-sha256 "$SOURCE_TREE_SHA256")
+          record minio-online python scripts/certify_live_object_store.py --phase online "${COMMON[@]}" --state-output "$STATE" --output "${A}/minio-online.json"
+          record minio-pause docker pause aos-minio
+          record minio-outage timeout 15s python scripts/certify_live_object_store.py --phase outage "${COMMON[@]}" --state "$STATE" --output "${A}/minio-outage.json"
+          record minio-unpause docker unpause aos-minio
+          record minio-recovery-ready bash -c 'for i in $(seq 1 60); do curl --fail --silent http://127.0.0.1:9000/minio/health/ready >/dev/null && exit 0; sleep 1; done; exit 1'
+          record minio-recovery python scripts/certify_live_object_store.py --phase recovery "${COMMON[@]}" --state "$STATE" --state-output "$STATE" --output "${A}/minio-recovery.json"
+
+          docker image inspect "${POSTGRES_IMAGE}" "${MINIO_IMAGE}" >"${A}/container-images.json"
+          printf 'container-image-inspect\tpassed\n' >>"${A}/step-status.tsv"
+          record aggregate-live-infrastructure python scripts/aggregate_live_infrastructure.py --project-version 1.6.0 --source-revision "$SOURCE_REVISION" --source-tree-sha256 "$SOURCE_TREE_SHA256" --evidence "${A}/postgresql-backend-termination.json" "${A}/postgresql-network-partition.json" "${A}/minio-online.json" "${A}/minio-outage.json" "${A}/minio-recovery.json" --step-status "${A}/step-status.tsv" --container-images "${A}/container-images.json" --output "${A}/live-infrastructure-v1.6.json"
+
+      - name: Persist full evidence to private repository
+        if: always()
+        env:
+          PRIVATE_TOKEN: ${{ secrets.LAZARUS_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch "${PRIVATE_RESULT_BRANCH}" "https://x-access-token:${PRIVATE_TOKEN}@github.com/${PRIVATE_REPO}.git" "${RUNNER_TEMP}/private-results"
+          D="${RUNNER_TEMP}/private-results/releases/v1.6/certification"; mkdir -p "$D"
+          if [ -d "${RUNNER_TEMP}/aos-v1.6-live-artifacts" ]; then cp -a "${RUNNER_TEMP}/aos-v1.6-live-artifacts/." "$D/"; else printf '{"passed":false,"failure":"artifact directory missing"}\n' >"$D/live-infrastructure-v1.6.json"; fi
+          cd "${RUNNER_TEMP}/private-results"
+          git config user.name 'AssuranceOS Certification Bot'; git config user.email 'actions@users.noreply.github.com'
+          git add releases/v1.6/certification
+          if ! git diff --cached --quiet; then git commit -m 'Record v1.6 live PostgreSQL and MinIO evidence [skip ci]'; git push --quiet origin "HEAD:${PRIVATE_RESULT_BRANCH}"; fi
+
+      - name: Publish redacted run summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          src=Path(os.environ['RUNNER_TEMP'])/'aos-v1.6-live-artifacts/live-infrastructure-v1.6.json'
+          out=Path('public-summary.json')
+          if src.exists():
+              d=json.loads(src.read_text()); r={'passed':bool(d.get('passed')),'project_version':d.get('project_version'),'report_sha256':d.get('report_sha256'),'source_tree_sha256':d.get('source_tree_sha256')}
+          else: r={'passed':False,'failure':'private certification report missing'}
+          out.write_text(json.dumps(r,indent=2)+'\n')
+          print(out.read_text())
+          if not r['passed']: raise SystemExit('live infrastructure certification failed')
+          PY
+
+      - name: Upload redacted summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: assuranceos-v1.6-redacted-summary
+          path: public-summary.json
+          if-no-files-found: error
