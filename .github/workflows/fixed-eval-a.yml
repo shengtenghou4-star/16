@@ -33,7 +33,6 @@ jobs:
           python-version: "3.12"
 
       - name: Execute fixed evaluation privately
-        id: evaluate
         shell: bash
         run: |
           set +e
@@ -47,15 +46,16 @@ jobs:
               > relay-output/install.log 2>&1
             install_status=$?
             printf '%s\n' "$install_status" > relay-output/install_exit_status.txt
+
             if [ "$install_status" -eq 0 ]; then
               whest validate --estimator whitebox_eval/estimator.py \
                 > relay-output/validate.log 2>&1
               validate_status=$?
-              printf '%s\n' "$validate_status" > relay-output/validate_exit_status.txt
             else
               validate_status=99
-              printf '%s\n' "$validate_status" > relay-output/validate_exit_status.txt
             fi
+            printf '%s\n' "$validate_status" > relay-output/validate_exit_status.txt
+
             if [ "$install_status" -eq 0 ] && [ "$validate_status" -eq 0 ]; then
               HF_XET_HIGH_PERFORMANCE=1 \
               whest run \
@@ -69,36 +69,12 @@ jobs:
               run_status=98
             fi
             printf '%s\n' "$run_status" > relay-output/run_exit_status.txt
-            python - <<'PY'
-          from __future__ import annotations
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
-
-          root = Path('relay-output')
-          files = {}
-          for path in sorted(root.rglob('*')):
-              if path.is_file() and path.name != 'manifest.json':
-                  files[path.relative_to(root).as_posix()] = {
-                      'bytes': path.stat().st_size,
-                      'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
-                  }
-          manifest = {
-              'schema_version': '1.0',
-              'job': 'fixed-eval-a',
-              'github_run_id': os.environ['GITHUB_RUN_ID'],
-              'github_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
-              'source_ref': 'relay/eval-a-20260723',
-              'files': files,
-          }
-          (root / 'manifest.json').write_text(
-              json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8'
-          )
-          PY
+            find relay-output -type f ! -name SHA256SUMS -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > relay-output/SHA256SUMS
+            printf '{"schema_version":"1.0","job":"fixed-eval-a","run_id":"%s","attempt":"%s","source_ref":"relay/eval-a-20260723"}\n' \
+              "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > relay-output/manifest.json
           ) > private-src/relay-output/wrapper.log 2>&1
-          status=$?
-          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
           exit 0
 
       - name: Push logs and result only to private repository
