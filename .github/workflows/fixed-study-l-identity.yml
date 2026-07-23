@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: shengtenghou4-star/19
-          ref: 7bd1c4e5ab78bcaf9b74cbc9238ea1ceef900600
+          ref: e7bd4bbf9d5e1dabd7470c5f2211cbb9021fe199
           token: ${{ secrets.LAZARUS_REPO_TOKEN }}
           path: private-src
           fetch-depth: 0
@@ -67,7 +67,7 @@ jobs:
             find relay-output-study-l-identity -type f ! -name SHA256SUMS -print0 \
               | sort -z \
               | xargs -0 sha256sum > relay-output-study-l-identity/SHA256SUMS
-            printf '{"schema_version":"1.0","job":"study-l-identity","run_id":"%s","attempt":"%s","source_commit":"7bd1c4e5ab78bcaf9b74cbc9238ea1ceef900600"}\n' \
+            printf '{"schema_version":"1.0","job":"study-l-identity","run_id":"%s","attempt":"%s","source_commit":"e7bd4bbf9d5e1dabd7470c5f2211cbb9021fe199"}\n' \
               "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > relay-output-study-l-identity/manifest.json
           ) > private-src/relay-output-study-l-identity/wrapper.log 2>&1
           exit 0
