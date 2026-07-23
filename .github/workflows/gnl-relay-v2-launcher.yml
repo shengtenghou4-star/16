@@ -1,0 +1,61 @@
+name: GNL relay v2 PR launcher
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "launch/distribution-shift-v2.json"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: gnl-relay-v2-launch
+  cancel-in-progress: false
+
+jobs:
+  preflight-and-dispatch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out pinned private source
+        uses: actions/checkout@v4
+        with:
+          repository: shengtenghou4-star/19
+          ref: agent/m3-public-compute
+          token: ${{ secrets.LAZARUS_REPO_TOKEN }}
+          path: private-src
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Verify private read/write permission
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          branch="compute-heartbeat/gnl-v2-launch-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name "public-compute-relay[bot]"
+          git config user.email "public-compute-relay[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          mkdir -p relay-heartbeat
+          printf '{"run_id":"%s","attempt":"%s","status":"ok","launcher":"pull_request"}\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > relay-heartbeat/gnl-v2-launch.json
+          git add relay-heartbeat/gnl-v2-launch.json
+          git commit -m "Verify GNL relay v2 launch permission"
+          git push origin "HEAD:$branch"
+
+      - name: Dispatch parallel public compute workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/private-source-compute.yml/dispatches" \
+            --data '{"ref":"main","inputs":{"source_ref":"agent/m3-public-compute"}}'
