@@ -1,0 +1,9 @@
+{
+  "job": "fixed-private-study-l-v2-full",
+  "source_commit": "e7bd4bbf9d5e1dabd7470c5f2211cbb9021fe199",
+  "identity_audit_ratio": 1.0000103250274073,
+  "dataset": "aicrowd/arc-whestbench-public-2026@v1-phase1/full",
+  "split_protocol": "800_train_100_validation_100_untouched_test",
+  "promotion_gate": "mean_ratio<=0.90,q90_ratio<=1,max_ratio<=1",
+  "mini_policy": "identity audit only completed; no correction tuning on mini"
+}
