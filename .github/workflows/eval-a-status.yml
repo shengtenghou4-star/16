@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p status
-          for name in a b c h; do
+          for name in a b c h i; do
             gh api "repos/$REPO/actions/workflows/fixed-eval-${name}.yml/runs?per_page=1" \
               --jq '.workflow_runs[0] | {id,status,conclusion,event,head_sha,created_at,updated_at,html_url}' \
               > "status/eval-${name}.json"
@@ -33,8 +33,11 @@ jobs:
               --jq '.workflow_runs[0] | {id,status,conclusion,event,head_sha,created_at,updated_at,html_url}' \
               > "status/study-${name}.json"
           done
+          gh api "repos/$REPO/actions/workflows/fixed-package-c.yml/runs?per_page=1" \
+            --jq '.workflow_runs[0] | {id,status,conclusion,event,head_sha,created_at,updated_at,html_url}' \
+            > status/package-c.json
           git config user.name "status-probe[bot]"
           git config user.email "status-probe[bot]@users.noreply.github.com"
-          git add status/eval-a.json status/eval-b.json status/eval-c.json status/eval-h.json status/study-d.json status/study-f.json
+          git add status/eval-a.json status/eval-b.json status/eval-c.json status/eval-h.json status/eval-i.json status/study-d.json status/study-f.json status/package-c.json
           git commit -m "Record fixed evaluation statuses [skip ci]" || exit 0
           git push
