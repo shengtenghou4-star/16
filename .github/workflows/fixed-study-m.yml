@@ -1,0 +1,78 @@
+name: Fixed private study M
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "launch/study-m.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixed-private-study-m
+  cancel-in-progress: false
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Check out pinned private source
+        uses: actions/checkout@v4
+        with:
+          repository: shengtenghou4-star/19
+          ref: relay/study-m-20260723
+          token: ${{ secrets.LAZARUS_REPO_TOKEN }}
+          path: private-src
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Execute global-context study privately
+        shell: bash
+        run: |
+          set +e
+          mkdir -p private-src/relay-output
+          (
+            cd private-src
+            set +x
+            python -m pip install --disable-pip-version-check \
+              'flopscope>=0.8.0rc5,<0.9.0' \
+              'whestbench>=0.12.0rc3,<0.13.0' \
+              'datasets>=3,<5' \
+              'scipy>=1.14,<2' \
+              'scikit-learn>=1.6,<2' \
+              > relay-output/install.log 2>&1
+            install_status=$?
+            printf '%s\n' "$install_status" > relay-output/install_exit_status.txt
+            if [ "$install_status" -eq 0 ]; then
+              HF_XET_HIGH_PERFORMANCE=1 \
+              OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 \
+              python whitebox_eval/train_full_global_corrector.py \
+                > relay-output/study.log 2> relay-output/study.stderr.log
+              study_status=$?
+            else
+              study_status=99
+            fi
+            printf '%s\n' "$study_status" > relay-output/study_exit_status.txt
+            find relay-output -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > relay-output/SHA256SUMS
+          ) > private-src/relay-output/wrapper.log 2>&1
+          exit 0
+      - name: Push study outputs only to private repository
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          branch="compute-results/study-m-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name "public-compute-relay[bot]"
+          git config user.email "public-compute-relay[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -f relay-output
+          git commit -m "Store fixed private study M result"
+          git push origin "HEAD:$branch"
+      - name: Enforce study result
+        shell: bash
+        run: test "$(cat private-src/relay-output/study_exit_status.txt 2>/dev/null || printf 97)" = "0"
