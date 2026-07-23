@@ -22,7 +22,11 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import json, os, urllib.request
-          workflows = ("fixed-study-l-full.yml", "fixed-study-l-identity.yml")
+          workflows = (
+              "fixed-study-l-full.yml",
+              "fixed-study-l-identity.yml",
+              "fixed-study-l-v2-full.yml",
+          )
           output = {}
           for workflow in workflows:
               url = f"https://api.github.com/repos/shengtenghou4-star/16/actions/workflows/{workflow}/runs?per_page=5"
