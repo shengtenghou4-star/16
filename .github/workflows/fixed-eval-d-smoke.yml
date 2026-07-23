@@ -1,0 +1,75 @@
+name: Fixed private evaluation D smoke
+
+on:
+  push:
+    paths:
+      - "launch/eval-d-smoke.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixed-private-eval-d-smoke
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out pinned private source
+        uses: actions/checkout@v4
+        with:
+          repository: shengtenghou4-star/19
+          ref: relay/eval-d-20260723
+          token: ${{ secrets.LAZARUS_REPO_TOKEN }}
+          path: private-src
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate candidate D privately
+        shell: bash
+        run: |
+          set +e
+          mkdir -p private-src/relay-output-smoke
+          (
+            cd private-src
+            set +x
+            python -m pip install --disable-pip-version-check \
+              'flopscope>=0.8.0rc5,<0.9.0' \
+              'whestbench>=0.12.0rc3,<0.13.0' \
+              > relay-output-smoke/install.log 2>&1
+            install_status=$?
+            printf '%s\n' "$install_status" > relay-output-smoke/install_exit_status.txt
+            if [ "$install_status" -eq 0 ]; then
+              whest validate --estimator whitebox_eval/estimator.py \
+                > relay-output-smoke/validate.log 2>&1
+              validate_status=$?
+            else
+              validate_status=99
+            fi
+            printf '%s\n' "$validate_status" > relay-output-smoke/validate_exit_status.txt
+          ) > private-src/relay-output-smoke/wrapper.log 2>&1
+          exit 0
+
+      - name: Push smoke diagnostics privately
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd private-src
+          branch="compute-results/eval-d-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name "public-compute-relay[bot]"
+          git config user.email "public-compute-relay[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -f relay-output-smoke
+          git commit -m "Store fixed private evaluation D smoke result"
+          git push origin "HEAD:$branch"
+
+      - name: Enforce validation
+        shell: bash
+        run: test "$(cat private-src/relay-output-smoke/validate_exit_status.txt 2>/dev/null || printf 97)" = "0"
