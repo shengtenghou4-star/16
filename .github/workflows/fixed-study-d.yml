@@ -50,7 +50,7 @@ jobs:
             printf '%s\n' "$install_status" > relay-output/install_exit_status.txt
             if [ "$install_status" -eq 0 ]; then
               HF_XET_HIGH_PERFORMANCE=1 \
-              python whitebox_eval/train_corrector.py \
+              python whitebox_eval/train_corrector_seedfix.py \
                 > relay-output/study.log 2> relay-output/study.stderr.log
               study_status=$?
             else
